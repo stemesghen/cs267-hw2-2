@@ -120,5 +120,3 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
 // 2.335e-06 seconds for 6000000 particles. - before sertial code with 1 node
 
 }
-
-
