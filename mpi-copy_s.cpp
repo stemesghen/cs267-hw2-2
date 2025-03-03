@@ -17,10 +17,12 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
     r2 = fmax(r2, min_r * min_r);
     double r = sqrt(r2);
 
-    double coef = (1 - cutoff / r) / r2 / mass;  // Short-range repulsion
+    double coef = (1.0 / pow(r, 12)) / mass;
+
     particle.ax += coef * dx;
     particle.ay += coef * dy;
 }
+
 
 // Move the particle using Velocity Verlet integration
 void move(particle_t& p, double size) {

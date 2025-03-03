@@ -3,10 +3,23 @@
 #include <cmath>
 #include <vector>
 // Put any static global variables here that you will use throughout the simulation.
+int main(int argc, char *argv[]) {
+    MPI_Init(&argc, &argv); 
 
+    int my_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    int num_procs; //number of ranks (processors) 
+    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
 
+    rank_start_index.resize(num_procs);
+    rank_end_index.resize(num_procs);
+
+    //Initialize seed - is that needed?  
+
+}
 
 // Apply the force from a neighbor to a particle
+
 void apply_force(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -17,7 +30,8 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
     r2 = fmax(r2, min_r * min_r);
     double r = sqrt(r2);
 
-    double coef = (1 - cutoff / r) / r2 / mass;  // Short-range repulsion
+    double coef = (1.0 / pow(r, 12)) / mass;
+
     particle.ax += coef * dx;
     particle.ay += coef * dy;
 }
@@ -51,10 +65,30 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
 
 
+    int current_rank_start_index = 0;
+
+    //loop over ranks
+    for (int irank = 0; irank < num_procs; irank++) {
+            int particles_per_rank = num_parts / num_procs;
+
+            if (rank < num_parts % num_procs) particles_per_rank++;
+
+            rank_start_index[irank] = current_rank_start_index;
+            rank_end_index[irank] = current_rank_start_index + nparticles_per_rank;
+
+            current_rank_start_index += nparticles_per_rank;
+
+
+            int my_start = (rank == 0) ? 0 : rank_end_index[rank - 1];
+            int my_end = rank_start_index[rank] + particles_per_rank;
+
+    }
+
+
     int grid_size = ceil(size / cutoff);  //grid size
 
     std::vector<std::vector<int>> grid(grid_size * grid_size);
-    for (int i = 0; i < num_parts; i++) {
+    for (int i = my_start; i < my_end; i++) {
         parts[i].ax = 0.0;
         parts[i].ay = 0.0;
 
@@ -70,7 +104,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 
     //Force for nearby particles (neighbor cells 3x3)
-    for (int i = 0; i < num_parts; i++) {
+    for (int i = my_start; i < my_end; i++) {
                 //current grid cell of particle
         int grid_cell_x = floor(parts[i].x / cutoff);
         int grid_cell_y = floor(parts[i].y / cutoff);
@@ -96,10 +130,18 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 
    // Move Particles
-    for (int i = 0; i < num_parts; ++i) 
-    {
+    for (int i = my_start; i < my_end; i++) {
+    
         move(parts[i], size);
     }
+
+
+//Ghost Particles Needed
+std::vector<particle_t> ghost_particles;
+
+
+
+
 }
 
 
@@ -112,12 +154,32 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
 
 //MPI communication goes in here - 
 
+
+//Communication between Rows: Use SendRecv  so that communication is more targeted 
+
+// For Communication  - - consider ghost particles
+MPI_Sendrecv(&ghost_particles_send, send_count, MPI_PARTICLE, neighbor_rank,
+             0, &ghost_particles_recv, recv_count, MPI_PARTICLE, neighbor_rank, 0,
+             MPI_COMM_WORLD, MPI_STATUS);
+
+
+
+
+// Write this function such that at the end of it, the master (rank == 0)
+
+//MPI_AllReduce ? or Gather?
+
+
+
+
 //Simulation Time = 0.08257 seconds for 1000 particles.
 
 
 // 2.284e-06 seconds for 6000000 particles. - before serial code with 2 nodes
 
 // 2.335e-06 seconds for 6000000 particles. - before sertial code with 1 node
+
+MPI_Finalize(); 
 
 }
 
