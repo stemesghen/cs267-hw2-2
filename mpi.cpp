@@ -2,11 +2,7 @@
 #include <mpi.h>
 #include <cmath>
 #include <vector>
-
-#include "common.h"
-#include <mpi.h>
-#include <cmath>
-#include <vector>
+#include <cstddef> 
 
 // Define an MPI struct type for particles
 MPI_Datatype MPI_PARTICLE;
@@ -52,12 +48,12 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     MPI_Aint displacements[6];
     MPI_Datatype types[6] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
 
-    displacements[0] = offsetof(particle_t, x);
-    displacements[1] = offsetof(particle_t, y);
-    displacements[2] = offsetof(particle_t, vx);
-    displacements[3] = offsetof(particle_t, vy);
-    displacements[4] = offsetof(particle_t, ax);
-    displacements[5] = offsetof(particle_t, ay);
+    displacements[0] = offsetof(struct particle_t, x);
+    displacements[1] = offsetof(struct particle_t, y);
+    displacements[2] = offsetof(struct particle_t, vx);
+    displacements[3] = offsetof(struct particle_t, vy);
+    displacements[4] = offsetof(struct particle_t, ax);
+    displacements[5] = offsetof(struct particle_t, ay);
 
     MPI_Type_create_struct(6, block_lengths, displacements, types, &MPI_PARTICLE);
     MPI_Type_commit(&MPI_PARTICLE);
