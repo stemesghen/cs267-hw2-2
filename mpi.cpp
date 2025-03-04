@@ -37,6 +37,12 @@ void move(particle_t& p, double size) {
     }
 }
 
+void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
+	// You can use this space to initialize data objects that you may need
+	// This function will be called once before the algorithm begins
+	// Do not do any particle simulation here
+}
+
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     // Divide work among ranks
     int base_count = num_parts / num_procs;
