@@ -2,10 +2,7 @@
 #include <mpi.h>
 #include <cmath>
 #include <vector>
-#include <cstddef> 
-
-// Define an MPI struct type for particles
-MPI_Datatype MPI_PARTICLE;
+#include <iostream>
 
 // Apply force between two particles
 void apply_force(particle_t& particle, particle_t& neighbor) {
@@ -17,18 +14,15 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
 
     r2 = fmax(r2, min_r * min_r);
     double r = sqrt(r2);
-
-    double coef = (1.0 / pow(r, 12)) / mass;
+    double coef = (1 - cutoff / r) / r2 / mass;
 
     particle.ax += coef * dx;
     particle.ay += coef * dy;
 }
 
-// Move the particle using Velocity Verlet integration
 void move(particle_t& p, double size) {
     p.x += p.vx * dt + 0.5 * p.ax * dt * dt;
     p.y += p.vy * dt + 0.5 * p.ay * dt * dt;
-
     p.vx += 0.5 * p.ax * dt;
     p.vy += 0.5 * p.ay * dt;
 
@@ -42,118 +36,97 @@ void move(particle_t& p, double size) {
     }
 }
 
+// Distribute particles based on position
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    // Create an MPI datatype for particle_t
-    int block_lengths[6] = {1, 1, 1, 1, 1, 1};
-    MPI_Aint displacements[6];
-    MPI_Datatype types[6] = {MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE};
-
-    displacements[0] = offsetof(struct particle_t, x);
-    displacements[1] = offsetof(struct particle_t, y);
-    displacements[2] = offsetof(struct particle_t, vx);
-    displacements[3] = offsetof(struct particle_t, vy);
-    displacements[4] = offsetof(struct particle_t, ax);
-    displacements[5] = offsetof(struct particle_t, ay);
-
-    MPI_Type_create_struct(6, block_lengths, displacements, types, &MPI_PARTICLE);
-    MPI_Type_commit(&MPI_PARTICLE);
+    double region_size = size / num_procs;
+    int local_count = 0;
+    for (int i = 0; i < num_parts; i++) {
+        int assigned_rank = std::min(num_procs - 1, static_cast<int>(parts[i].x / region_size));
+        if (assigned_rank == rank) {
+            parts[local_count++] = parts[i];
+        }
+    }
+    // Resize to match the actual number of particles in this rank
+    num_parts = local_count;
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    // Divide work among ranks
-    int base_count = num_parts / num_procs;
-    int extra = num_parts % num_procs;
+    double region_size = size / num_procs;
 
-    int my_start = rank * base_count + std::min(rank, extra);
-    int my_end = my_start + base_count + (rank < extra);
+    // Identify ghost particles (neighbor exchange)
+    std::vector<particle_t> send_left, send_right, recv_left, recv_right;
+    int left_rank = (rank == 0) ? MPI_PROC_NULL : rank - 1;
+    int right_rank = (rank == num_procs - 1) ? MPI_PROC_NULL : rank + 1;
 
-    int grid_size = ceil(size / cutoff);
-    std::vector<std::vector<int>> grid(grid_size * grid_size);
-
-    // Assign particles to grid
-    for (int i = my_start; i < my_end; i++) {
-        parts[i].ax = 0.0;
-        parts[i].ay = 0.0;
-        int grid_x = floor(parts[i].x / cutoff);
-        int grid_y = floor(parts[i].y / cutoff);
-
-        if (grid_x >= 0 && grid_x < grid_size && grid_y >= 0 && grid_y < grid_size) {
-            int grid_index = grid_x + grid_y * grid_size;
-            grid[grid_index].push_back(i);
-        }
+    for (int i = 0; i < num_parts; i++) {
+        if (parts[i].x < rank * region_size + cutoff) send_left.push_back(parts[i]);
+        if (parts[i].x > (rank + 1) * region_size - cutoff) send_right.push_back(parts[i]);
     }
 
-    // Exchange ghost particles (both x and y directions)
-    std::vector<particle_t> ghost_particles_send, ghost_particles_recv;
-    int left_neighbor = (rank == 0) ? MPI_PROC_NULL : rank - 1;
-    int right_neighbor = (rank == num_procs - 1) ? MPI_PROC_NULL : rank + 1;
+    int send_counts[2] = {static_cast<int>(send_left.size()), static_cast<int>(send_right.size())};
+    int recv_counts[2];
 
-    for (int i = my_start; i < my_end; i++) {
-        if (parts[i].x < cutoff || parts[i].x > size - cutoff || parts[i].y < cutoff || parts[i].y > size - cutoff) {
-            ghost_particles_send.push_back(parts[i]);
-        }
-    }
+    MPI_Request reqs[4];
+    MPI_Irecv(&recv_counts[0], 1, MPI_INT, left_rank, 1, MPI_COMM_WORLD, &reqs[0]);
+    MPI_Irecv(&recv_counts[1], 1, MPI_INT, right_rank, 2, MPI_COMM_WORLD, &reqs[1]);
+    MPI_Isend(&send_counts[0], 1, MPI_INT, left_rank, 2, MPI_COMM_WORLD, &reqs[2]);
+    MPI_Isend(&send_counts[1], 1, MPI_INT, right_rank, 1, MPI_COMM_WORLD, &reqs[3]);
+    MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
 
-    int send_count = ghost_particles_send.size();
-    int recv_count;
+    recv_left.resize(recv_counts[0]);
+    recv_right.resize(recv_counts[1]);
 
-    MPI_Sendrecv(&send_count, 1, MPI_INT, left_neighbor, 0,
-                 &recv_count, 1, MPI_INT, right_neighbor, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Irecv(recv_left.data(), recv_counts[0], PARTICLE, left_rank, 3, MPI_COMM_WORLD, &reqs[0]);
+    MPI_Irecv(recv_right.data(), recv_counts[1], PARTICLE, right_rank, 4, MPI_COMM_WORLD, &reqs[1]);
+    MPI_Isend(send_left.data(), send_counts[0], PARTICLE, left_rank, 4, MPI_COMM_WORLD, &reqs[2]);
+    MPI_Isend(send_right.data(), send_counts[1], PARTICLE, right_rank, 3, MPI_COMM_WORLD, &reqs[3]);
+    MPI_Waitall(4, reqs, MPI_STATUSES_IGNORE);
 
-    ghost_particles_recv.resize(recv_count);
-    MPI_Sendrecv(ghost_particles_send.data(), send_count, MPI_PARTICLE, left_neighbor, 1,
-                 ghost_particles_recv.data(), recv_count, MPI_PARTICLE, right_neighbor, 1,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-    // Compute forces for local particles
-    for (int i = my_start; i < my_end; i++) {
-        int grid_x = floor(parts[i].x / cutoff);
-        int grid_y = floor(parts[i].y / cutoff);
-
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                int neighbor_x = grid_x + dx;
-                int neighbor_y = grid_y + dy;
-
-                if (neighbor_x >= 0 && neighbor_x < grid_size &&
-                    neighbor_y >= 0 && neighbor_y < grid_size) {
-                    int neighbor_index = neighbor_x + neighbor_y * grid_size;
-
-                    for (int j : grid[neighbor_index]) {
-                        if (i != j) {
-                            apply_force(parts[i], parts[j]);
-                        }
-                    }
-                }
+    // Compute forces-local
+    for (int i = 0; i < num_parts; i++) {
+        parts[i].ax = parts[i].ay = 0.0;
+        for (int j = 0; j < num_parts; j++) {
+            if (i != j) {
+                apply_force(parts[i], parts[j]);
             }
         }
     }
 
-    // Compute forces from ghost particles
-    for (auto &ghost : ghost_particles_recv) {
-        for (int i = my_start; i < my_end; i++) {
+    // Compute forces-ghost 
+    for (auto& ghost : recv_left) {
+        for (int i = 0; i < num_parts; i++) {
+            apply_force(parts[i], ghost);
+        }
+    }
+    for (auto& ghost : recv_right) {
+        for (int i = 0; i < num_parts; i++) {
             apply_force(parts[i], ghost);
         }
     }
 
     // Move particles
-    for (int i = my_start; i < my_end; i++) {
+    for (int i = 0; i < num_parts; i++) {
         move(parts[i], size);
     }
 }
 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    int base_count = num_parts / num_procs;
-    int extra = num_parts % num_procs;
+    std::vector<int> recv_counts(num_procs);
+    std::vector<int> displs(num_procs);
+    int local_size = num_parts;
 
-    MPI_Gather((rank == 0) ? MPI_IN_PLACE : &parts[rank * base_count + std::min(rank, extra)],
-               base_count + (rank < extra), MPI_PARTICLE,
-               parts, base_count + (rank < extra), MPI_PARTICLE,
-               0, MPI_COMM_WORLD);
-}
+    MPI_Gather(&local_size, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-void finalize_simulation() {
-    MPI_Type_free(&MPI_PARTICLE);
+    if (rank == 0) {
+        displs[0] = 0;
+        for (int i = 1; i < num_procs; i++) {
+            displs[i] = displs[i - 1] + recv_counts[i - 1];
+        }
+    }
+
+    MPI_Gatherv(parts, num_parts, PARTICLE,
+                rank == 0 ? parts : nullptr, recv_counts.data(), displs.data(), PARTICLE,
+                0, MPI_COMM_WORLD);
 }
 
 
