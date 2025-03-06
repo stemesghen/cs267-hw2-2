@@ -5,37 +5,26 @@
 #include <iostream>
 #include <algorithm>
 
-// Initialize particle positions and assign to ranks
-void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    int base_count = num_parts / num_procs;
-    int extra = num_parts % num_procs;
-
-    int my_start = rank * base_count + std::min(rank, extra);
-    int my_end = my_start + base_count + (rank < extra);
-
-    for (int i = my_start; i < my_end; i++) {
-        parts[i].ax = 0.0;
-        parts[i].ay = 0.0;
-    }
-}
-
-// Apply force
 void apply_force(particle_t& particle, particle_t& neighbor) {
+    // Calculate Distance
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
     double r2 = dx * dx + dy * dy;
 
-    if (r2 > cutoff * cutoff) return;
+    // Check if the two particles should interact
+    if (r2 > cutoff * cutoff)
+        return;
 
     r2 = fmax(r2, min_r * min_r);
     double r = sqrt(r2);
 
+    // Very simple short-range repulsive force
     double coef = (1 - cutoff / r) / r2 / mass;
     particle.ax += coef * dx;
     particle.ay += coef * dy;
 }
 
-// Move the particle
+// Integrate the ODE
 void move(particle_t& p, double size) {
     p.x += p.vx * dt + 0.5 * p.ax * dt * dt;
     p.y += p.vy * dt + 0.5 * p.ay * dt * dt;
@@ -51,6 +40,20 @@ void move(particle_t& p, double size) {
     if (p.y < 0 || p.y > size) {
         p.y = (p.y < 0) ? -p.y : 2 * size - p.y;
         p.vy = -p.vy;
+    }
+}
+
+// Initialize particle positions and assign to ranks
+void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
+    int base_count = num_parts / num_procs;
+    int extra = num_parts % num_procs;
+
+    int my_start = rank * base_count + std::min(rank, extra);
+    int my_end = my_start + base_count + (rank < extra);
+
+    for (int i = my_start; i < my_end; i++) {
+        parts[i].ax = 0.0;
+        parts[i].ay = 0.0;
     }
 }
 
