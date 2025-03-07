@@ -2,7 +2,7 @@
 #include <mpi.h>
 #include <cmath>
 #include <vector>
-
+#include <unordered_set>
 #include <iostream>
 #include <algorithm>
 #include <random>
