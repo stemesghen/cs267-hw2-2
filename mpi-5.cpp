@@ -7,35 +7,40 @@
 #include <algorithm>
 #include <random>
 
+// Initialize particle positions and velocities
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     for (int i = 0; i < num_parts; i++) {
-    parts[i].id = rank * num_parts + i; 
+    parts[i].id = rank * num_parts + i; // Assign unique ID based on MPI rank
 }
 
     for (int i = 0; i < num_parts; i++) {
         parts[i].ax = 0.0;
         parts[i].ay = 0.0;
-
     }
 }
 
 
 
 void apply_force(particle_t& particle, particle_t& neighbor) {
+    // Calculate Distance
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
     double r2 = dx * dx + dy * dy;
 
+    // Check if the two particles should interact
     if (r2 > cutoff * cutoff)
         return;
 
     r2 = fmax(r2, min_r * min_r);
     double r = sqrt(r2);
 
+    // Very simple short-range repulsive force
     double coef = (1 - cutoff / r) / r2 / mass;
     particle.ax += coef * dx;
     particle.ay += coef * dy;
 }
+
+
 
 void move(particle_t& p, double size) {
     p.vx += p.ax * dt;
@@ -62,15 +67,15 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     std::vector<particle_t> send_top, send_bottom;
     std::vector<particle_t> recv_top, recv_bottom;
 
-    std::vector<particle_t> real_particles; 
+    std::vector<particle_t> real_particles;
 
     for (int i = 0; i < num_parts; i++) {
-        if (parts[i].y - bottom_bound < cutoff) send_bottom.push_back(parts[i]);  
-        if (top_bound - parts[i].y < cutoff) send_top.push_back(parts[i]);        
+        if (parts[i].y - bottom_bound < cutoff) send_bottom.push_back(parts[i]);  // Close to bottom
+        if (top_bound - parts[i].y < cutoff) send_top.push_back(parts[i]);        // Close to top
 
         if (parts[i].y >= bottom_bound && parts[i].y <= top_bound) {
-            real_particles.push_back(parts[i]);  // move local
-        }
+            real_particles.push_back(parts[i]);  // Only local (owned) particles move
+       }
     }
 
     // ranks for top and bottom neighbors
@@ -99,10 +104,10 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     all_particles.insert(all_particles.end(), recv_top.begin(), recv_top.end());  // Add ghosts
     all_particles.insert(all_particles.end(), recv_bottom.begin(), recv_bottom.end());  // Add ghosts
 
-    // Debug
+    // Debugging
     std::cout << "Rank " << rank << " sending " << send_top.size() << " particles to top" << std::endl;
     std::cout << "Rank " << rank << " sending " << send_bottom.size() << " particles to bottom" << std::endl;
-    std::cout << "Rank " << rank << " receiving " << recv_top.size() << " ghost particles from top" << std::endl;
+std::cout << "Rank " << rank << " receiving " << recv_top.size() << " ghost particles from top" << std::endl;
     std::cout << "Rank " << rank << " receiving " << recv_bottom.size() << " ghost particles from bottom" << std::endl;
 
     for (auto& p : real_particles) {
@@ -115,7 +120,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             if (&p != &neighbor) {
                 apply_force(p, neighbor);
             }
-        }
+                  }
     }
 
     for (auto& p : real_particles) {
@@ -129,6 +134,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 
 
+// Gather particle data to the root rank for saving
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     std::vector<int> recv_counts(num_procs), displs(num_procs);
     int local_size = num_parts;
@@ -149,7 +155,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
                 rank == 0 ? all_particles.data() : nullptr, recv_counts.data(), displs.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
 
-    if (rank == 0) {
+     if (rank == 0) {
         std::sort(all_particles.begin(), all_particles.end(), [](const particle_t &a, const particle_t &b) {
             return a.id < b.id;
         });
@@ -157,4 +163,20 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     }
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
