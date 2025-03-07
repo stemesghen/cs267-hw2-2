@@ -70,10 +70,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     std::vector<particle_t> real_particles;
 
     for (int i = 0; i < num_parts; i++) {
-        if (parts[i].y - bottom_bound < cutoff && rank > 0) 
-            send_bottom.push_back(parts[i]);  // Close to bottom
-        if (top_bound - parts[i].y < cutoff && rank < num_procs - 1) 
-            send_top.push_back(parts[i]);        // Close to top
+        if (parts[i].y - bottom_bound < cutoff && rank > 0) send_bottom.push_back(parts[i]);  // Close to bottom
+        if (top_bound - parts[i].y < cutoff && rank < num_procs - 1) send_top.push_back(parts[i]);        // Close to top
 
         if (parts[i].y >= bottom_bound && parts[i].y <= top_bound) {
             real_particles.push_back(parts[i]);  // Only local (owned) particles move
@@ -102,14 +100,14 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     MPI_Sendrecv(send_bottom.data(), send_counts_tb[1], PARTICLE, bottom_rank, 4,
                  recv_top.data(), recv_counts_tb[0], PARTICLE, top_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    // std::vector<particle_t> all_particles = real_particles;  // Start with owned particles
-    // all_particles.insert(all_particles.end(), recv_top.begin(), recv_top.end());  // Add ghosts
-    // all_particles.insert(all_particles.end(), recv_bottom.begin(), recv_bottom.end());  // Add ghosts
+    std::vector<particle_t> all_particles = real_particles;  // Start with owned particles
+    all_particles.insert(all_particles.end(), recv_top.begin(), recv_top.end());  // Add ghosts
+    all_particles.insert(all_particles.end(), recv_bottom.begin(), recv_bottom.end());  // Add ghosts
 
     // Debugging
     std::cout << "Rank " << rank << " sending " << send_top.size() << " particles to top" << std::endl;
     std::cout << "Rank " << rank << " sending " << send_bottom.size() << " particles to bottom" << std::endl;
-    std::cout << "Rank " << rank << " receiving " << recv_top.size() << " ghost particles from top" << std::endl;
+std::cout << "Rank " << rank << " receiving " << recv_top.size() << " ghost particles from top" << std::endl;
     std::cout << "Rank " << rank << " receiving " << recv_bottom.size() << " ghost particles from bottom" << std::endl;
 
 
@@ -122,16 +120,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 
     for (auto& p : real_particles) {
-        for (auto& neighbor : real_particles) {
+        for (auto& neighbor : all_particles) {
             if (p.id == neighbor.id) continue;  // Ensure no self-interaction
-            apply_force(p, neighbor);
-        }
-        for (auto& neighbor : recv_top) {
-            if (neighbor.id == p.id) continue;
-            apply_force(p, neighbor);
-        }
-        for (auto& neighbor : recv_bottom) {
-            if (neighbor.id == p.id) continue;
             apply_force(p, neighbor);
         }
     }
