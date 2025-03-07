@@ -70,8 +70,10 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     std::vector<particle_t> real_particles;
 
     for (int i = 0; i < num_parts; i++) {
-        if (parts[i].y - bottom_bound < cutoff && rank > 0) send_bottom.push_back(parts[i]);  // Close to bottom
-        if (top_bound - parts[i].y < cutoff && rank < num_procs - 1) send_top.push_back(parts[i]);        // Close to top
+        if (parts[i].y - bottom_bound < cutoff && rank > 0) 
+            send_bottom.push_back(parts[i]);  // Close to bottom
+        if (top_bound - parts[i].y < cutoff && rank < num_procs - 1) 
+            send_top.push_back(parts[i]);        // Close to top
 
         if (parts[i].y >= bottom_bound && parts[i].y <= top_bound) {
             real_particles.push_back(parts[i]);  // Only local (owned) particles move
@@ -125,9 +127,11 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             apply_force(p, neighbor);
         }
         for (auto& neighbor : recv_top) {
+            if (neighbor.id == p.id) continue;
             apply_force(p, neighbor);
         }
         for (auto& neighbor : recv_bottom) {
+            if (neighbor.id == p.id) continue;
             apply_force(p, neighbor);
         }
     }
