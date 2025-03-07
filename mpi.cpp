@@ -100,7 +100,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     MPI_Sendrecv(send_bottom.data(), send_counts_tb[1], PARTICLE, bottom_rank, 4,
                  recv_top.data(), recv_counts_tb[0], PARTICLE, top_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    std::vector<particle_t> send_top, send_bottom, recv_top, recv_bottom, real_particles;  // Start with owned particles
+    // std::vector<particle_t> all_particles = real_particles;  // Start with owned particles
     // all_particles.insert(all_particles.end(), recv_top.begin(), recv_top.end());  // Add ghosts
     // all_particles.insert(all_particles.end(), recv_bottom.begin(), recv_bottom.end());  // Add ghosts
 
