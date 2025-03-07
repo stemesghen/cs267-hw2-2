@@ -1,5 +1,3 @@
-
-
 #include "common.h"
 #include <mpi.h>
 #include <cmath>
