@@ -5,6 +5,20 @@
 #include <iostream>
 #include <algorithm>
 
+// Initialize particle positions and assign to ranks
+void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
+    int base_count = num_parts / num_procs;
+    int extra = num_parts % num_procs;
+
+    int my_start = rank * base_count + std::min(rank, extra);
+    int my_end = my_start + base_count + (rank < extra);
+
+    for (int i = my_start; i < my_end; i++) {
+        parts[i].ax = 0.0;
+        parts[i].ay = 0.0;
+    }
+}
+
 void apply_force(particle_t& particle, particle_t& neighbor) {
     // Calculate Distance
     double dx = neighbor.x - particle.x;
@@ -40,20 +54,6 @@ void move(particle_t& p, double size) {
     if (p.y < 0 || p.y > size) {
         p.y = (p.y < 0) ? -p.y : 2 * size - p.y;
         p.vy = -p.vy;
-    }
-}
-
-// Initialize particle positions and assign to ranks
-void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    int base_count = num_parts / num_procs;
-    int extra = num_parts % num_procs;
-
-    int my_start = rank * base_count + std::min(rank, extra);
-    int my_end = my_start + base_count + (rank < extra);
-
-    for (int i = my_start; i < my_end; i++) {
-        parts[i].ax = 0.0;
-        parts[i].ay = 0.0;
     }
 }
 
@@ -130,55 +130,29 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     std::vector<int> recv_counts(num_procs);
     std::vector<int> displs(num_procs);
-
-    int local_size = num_parts;
-
-    MPI_Gather(&local_size, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
-
+    MPI_Gather(&num_parts, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+    int total_particles = 0;
     if (rank == 0) {
         displs[0] = 0;
         for (int i = 1; i < num_procs; i++) {
             displs[i] = displs[i - 1] + recv_counts[i - 1];
         }
+        total_particles = displs[num_procs - 1] + recv_counts[num_procs - 1];
+    }
+
+    std::vector<particle_t> all_parts;
+    if (rank == 0) {
+        all_parts.resize(total_particles);
     }
 
     MPI_Gatherv(parts, num_parts, PARTICLE,
-                rank == 0 ? parts : nullptr, recv_counts.data(), displs.data(), PARTICLE,
+                rank == 0 ? all_parts.data() : nullptr, recv_counts.data(), displs.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        std::copy(all_parts.begin(), all_parts.end(), parts);
+    }
 }
-
-
-
-
-//MPI communication goes in here - 
-
-
-//Communication between Rows: Use SendRecv  so that communication is more targeted 
-
-// For Communication  - - consider ghost particles
-
-//MPI_Sendrecv(&ghost_particles_send, send_count, MPI_PARTICLE, neighbor_rank,
-             //0, &ghost_particles_recv, recv_count, MPI_PARTICLE, neighbor_rank, 0,
-             //MPI_COMM_WORLD, MPI_STATUS);
-
-
-
-
-// Write this function such that at the end of it, the master (rank == 0)
-
-//MPI_AllReduce ? or Gather?
-
-
-
-
-//Simulation Time = 0.08257 seconds for 1000 particles.
-
-
-// 2.284e-06 seconds for 6000000 particles. - before serial code with 2 nodes
-
-// 2.335e-06 seconds for 6000000 particles. - before sertial code with 1 node
-
-//MPI_Finalize(); 
 
 
 
