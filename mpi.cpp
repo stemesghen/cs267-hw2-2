@@ -70,12 +70,22 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     std::vector<particle_t> real_particles;
 
     for (int i = 0; i < num_parts; i++) {
-        if (parts[i].y - bottom_bound <= cutoff) send_bottom.push_back(parts[i]);  // Close to bottom
-        if (top_bound - parts[i].y <= cutoff) send_top.push_back(parts[i]);        // Close to top
-
+        if (parts[i].y - bottom_bound <= cutoff&& rank > 0) {  
+            bool already_sent = false;
+            for (auto& p : send_bottom) {
+                if (p.id == parts[i].id) {
+                    already_sent = true;
+                    break;
+                }
+            }
+            if (!already_sent) send_bottom.push_back(parts[i]);  
+        }
+        if (top_bound - parts[i].y <= cutoff && rank < num_procs - 1) {
+            send_top.push_back(parts[i]);  
+        }
         if (parts[i].y >= bottom_bound && parts[i].y <= top_bound) {
-            real_particles.push_back(parts[i]);  // Only local (owned) particles move
-       }
+            real_particles.push_back(parts[i]); 
+        }
     }
 
     // ranks for top and bottom neighbors
@@ -100,16 +110,27 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     MPI_Sendrecv(send_bottom.data(), send_counts_tb[1], PARTICLE, bottom_rank, 4,
                  recv_top.data(), recv_counts_tb[0], PARTICLE, top_rank, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+    std::unordered_set<int> seen_ids;
     std::vector<particle_t> all_particles = real_particles;  // Start with owned particles
     all_particles.insert(all_particles.end(), recv_top.begin(), recv_top.end());  // Add ghosts
     all_particles.insert(all_particles.end(), recv_bottom.begin(), recv_bottom.end());  // Add ghosts
 
-    // Debugging
-    std::cout << "Rank " << rank << " sending " << send_top.size() << " particles to top" << std::endl;
-    std::cout << "Rank " << rank << " sending " << send_bottom.size() << " particles to bottom" << std::endl;
-std::cout << "Rank " << rank << " receiving " << recv_top.size() << " ghost particles from top" << std::endl;
-    std::cout << "Rank " << rank << " receiving " << recv_bottom.size() << " ghost particles from bottom" << std::endl;
+    for (auto& p : recv_top) {
+        if (seen_ids.find(p.id) == seen_ids.end()) {
+            all_particles.push_back(p);
+            seen_ids.insert(p.id);
+        }
+    }
+    for (auto& p : recv_bottom) {
+        if (seen_ids.find(p.id) == seen_ids.end()) {
+            all_particles.push_back(p);
+            seen_ids.insert(p.id);
+        }
+    }
 
+    // Clear ghost particles to prevent accumulation
+    recv_top.clear();
+    recv_bottom.clear();
 
     for (auto& p : real_particles) {
         p.ax = 0.0;
@@ -117,19 +138,11 @@ std::cout << "Rank " << rank << " receiving " << recv_top.size() << " ghost part
     }
 
 
-
-
     for (auto& p : real_particles) {
         for (auto& neighbor : all_particles) {
             if (p.id == neighbor.id) continue;  // Ensure no self-interaction
             apply_force(p, neighbor);
         }
-    }
-
-        // **Debugging Forces Applied**
-    for (auto& p : real_particles) {
-        std::cout << "Rank " << rank << " particle " << p.id
-                  << " ax=" << p.ax << " ay=" << p.ay << std::endl;
     }
 
     for (auto& p : real_particles) {
