@@ -110,24 +110,32 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 // Gather results
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    std::vector<int> recv_counts(num_procs), displs(num_procs);
+    std::vector<int> recv_counts(num_procs, 0);
+    std::vector<int> displs(num_procs, 0);
 
-    // Gather the number of particles from each process
     MPI_Gather(&num_parts, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    int total_particles = 0;
     if (rank == 0) {
         displs[0] = 0;
         for (int i = 1; i < num_procs; i++) {
             displs[i] = displs[i - 1] + recv_counts[i - 1];
         }
-    }
+        total_particles = displs[num_procs - 1] + recv_counts[num_procs - 1];
 
-    std::vector<particle_t> all_parts(rank == 0 ? std::accumulate(recv_counts.begin(), recv_counts.end(), 0) : 0);
+        parts = (particle_t*) realloc(parts, total_particles * sizeof(particle_t));
+        if (!parts) {
+            fprintf(stderr, "ERROR: Memory allocation failed for parts on rank 0.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+    }
+    std::vector<particle_t> all_parts(rank == 0 ? total_particles : 0);
 
     MPI_Gatherv(rank == 0 ? MPI_IN_PLACE : parts, num_parts, PARTICLE,
                 rank == 0 ? all_parts.data() : nullptr, recv_counts.data(), displs.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
 
+    
     if (rank == 0) {
         std::sort(all_parts.begin(), all_parts.end(), [](const particle_t &a, const particle_t &b) {
             return a.id < b.id;
@@ -136,3 +144,4 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         std::copy(all_parts.begin(), all_parts.end(), parts);
     }
 }
+
