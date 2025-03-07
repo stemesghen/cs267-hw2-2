@@ -122,13 +122,13 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     for (auto& p : real_particles) {
         for (auto& neighbor : real_particles) {
             if (p.id == neighbor.id) continue;  // Ensure no self-interaction
-            apply_force(p, neighbor, rank);
+            apply_force(p, neighbor);
         }
         for (auto& neighbor : recv_top) {
-            apply_force(p, neighbor, rank);
+            apply_force(p, neighbor);
         }
         for (auto& neighbor : recv_bottom) {
-            apply_force(p, neighbor, rank);
+            apply_force(p, neighbor);
         }
     }
 
