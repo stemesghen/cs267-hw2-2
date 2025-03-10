@@ -161,4 +161,16 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
 
         std::cout << "Rank " << rank << " gathered " << all_particles.size() << " particles.\n";
     }
+    if (rank == 0) {
+        std::ofstream out("mpi.parts.out");
+        if (!out) {
+            std::cerr << "Error: Could not open mpi.parts.out for writing" << std::endl;
+            return;
+        }
+        for (const auto& p : all_particles) {
+            out << p.id << " " << p.x << " " << p.y << "\n";
+        }
+        out.close();
+        std::cout << "Rank 0 successfully wrote output" << std::endl;
+    }
 }
