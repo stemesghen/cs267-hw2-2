@@ -282,6 +282,12 @@ std::cout << "Rank " << rank << " received " << recv_top_ghosts.size()
           << " from top, " << recv_bottom_ghosts.size() << " from bottom." << std::endl;
 
 
+
+// Reset acceleration for all local particles
+for (int i = 0; i < num_parts; ++i) {
+    parts[i].ax = parts[i].ay = 0;
+}
+
 // Reset acceleration for all local particles
 for (int i = 0; i < num_parts; ++i) {
     parts[i].ax = parts[i].ay = 0;
@@ -289,12 +295,11 @@ for (int i = 0; i < num_parts; ++i) {
 
 // Loop through each local particle
 for (int i = 0; i < num_parts; ++i) {
-    int cell_x = (int)(floor(parts[i].x / cutoff));
-    int cell_y = (int)(floor(parts[i].y / cutoff));
+    int cell_x = (int)((parts[i].x + 1e-9) / cutoff);
+    int cell_y = (int)((parts[i].y + 1e-9) / cutoff);
 
-    // Ensure cell indices are within bounds
-    if (cell_x < 0 || cell_x >= num_cells_x || cell_y < 0 || cell_y >= num_cells_y)
-        continue;
+    std::cout << "Particle " << i << " at (" << parts[i].x << ", " << parts[i].y 
+              << ") belongs to cell (" << cell_x << ", " << cell_y << ")\n";
 
     // 3×3 neighborhood search
     for (int x = -1; x <= 1; x++) {
@@ -302,14 +307,18 @@ for (int i = 0; i < num_parts; ++i) {
             int neighbor_x = cell_x + x;
             int neighbor_y = cell_y + y;
 
-            // Check bounds
+            // Bounds check
             if (neighbor_x >= 0 && neighbor_x < num_cells_x &&
                 neighbor_y >= 0 && neighbor_y < num_cells_y) {
                 
                 int neighbor_idx = neighbor_x + neighbor_y * num_cells_x;
 
+                std::cout << "Particle " << i << " checking cell (" 
+                          << neighbor_x << ", " << neighbor_y << ")\n";
+
                 for (int j : grid[neighbor_idx]) {
-                    if (&parts[i] != &parts[j]) {  // Avoid self-interactions
+                    if (i != j) {
+                        std::cout << "Applying force between P" << i << " and P" << j << "\n";
                         apply_force(parts[i], parts[j]);
                     }
                 }
@@ -318,32 +327,28 @@ for (int i = 0; i < num_parts; ++i) {
     }
 }
 
-// Handle ghost particle force interactions safely
+// 🔹 Add ghost particle force interactions
 for (particle_t& ghost : recv_top_ghosts) {
-    if (ghost.y >= domain_height - cutoff && ghost.y <= domain_height) {
-        for (int i = 0; i < num_parts; ++i) {
-            apply_force(parts[i], ghost);
-        }
+    for (int i = 0; i < num_parts; ++i) {
+        std::cout << "Applying force between local P" << i << " and top ghost P" << ghost.id << "\n";
+        apply_force(parts[i], ghost);
     }
 }
 
 for (particle_t& ghost : recv_bottom_ghosts) {
-    if (ghost.y >= 0 && ghost.y < cutoff) {
-        for (int i = 0; i < num_parts; ++i) {
-            apply_force(parts[i], ghost);
-        }
+    for (int i = 0; i < num_parts; ++i) {
+        std::cout << "Applying force between local P" << i << " and bottom ghost P" << ghost.id << "\n";
+        apply_force(parts[i], ghost);
     }
 }
 
-// Debugging: Check particle counts per cell
-for (int c = 0; c < num_cells_x * num_cells_y; c++) {
-    std::cout << "Cell " << c << " has " << grid[c].size() << " particles.\n";
+// 🔹 Confirm Acceleration Update
+for (int i = 0; i < num_parts; ++i) {
+    std::cout << "Particle " << i << " final acceleration: ax=" << parts[i].ax 
+              << ", ay=" << parts[i].ay << "\n";
 }
 
-// Debugging: Confirm forces are being applied
-for (int i = 0; i < num_parts; ++i) {
-    std::cout << "Particle " << i << " acceleration before: " << parts[i].ax << ", " << parts[i].ay << "\n";
-}
+
 
 
 /*
