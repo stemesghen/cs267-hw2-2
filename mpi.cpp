@@ -72,7 +72,6 @@ void move(particle_t& p, double size) {
 
 }
 
-
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     mpi_start_index.resize(num_procs);
     mpi_end_index.resize(num_procs);
@@ -120,7 +119,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     if (rank < num_procs - 1) {
         int send_count = top_ghost_particles.size();
-        int recv_count;
+        int recv_count = 0;
 
         MPI_Sendrecv(&send_count, 1, MPI_INT, rank + 1, 0,
                      &recv_count, 1, MPI_INT, rank + 1, 0,
@@ -136,7 +135,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     if (rank > 0) {
         int send_count = bottom_ghost_particles.size();
-        int recv_count;
+        int recv_count = 0;
 
         MPI_Sendrecv(&send_count, 1, MPI_INT, rank - 1, 0,
                      &recv_count, 1, MPI_INT, rank - 1, 0,
@@ -165,10 +164,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
                     int neighbor_idx = neighbor_x + neighbor_y * num_cells_x;
 
                     for (int j : grid[neighbor_idx]) {
-                        if (i != j) {
-                            if (j >= num_parts) {
-                                continue;
-                            }
+                        if (i != j && j < num_parts) {
                             apply_force(parts[i], parts[j]);
                         }
                     }
@@ -205,7 +201,6 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     }
 
     std::vector<particle_t> recv_from_next, recv_from_prev;
-
     int send_count_next = send_to_next.size();
     int send_count_prev = send_to_prev.size();
     int recv_count_next = 0, recv_count_prev = 0;
