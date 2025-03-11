@@ -16,12 +16,11 @@ using namespace std;
 extern MPI_Datatype PARTICLE;
 int num_cells_x;     // Number of grid cells along X
 int num_cells_y;     // Number of grid cells along Y
-double domain_height; // Domain height (initialized later)
+double domain_height; // Domain height 
 
 std::vector<int> mpi_start_index;
 std::vector<int> mpi_end_index;
 
-// Apply force from neighbor to particle
 void apply_force(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -38,7 +37,6 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
-// Integrate the ODE
 void move(particle_t& p, double size) {
     p.vx += p.ax * dt;
     p.vy += p.ay * dt;
@@ -160,11 +158,11 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     int local_num_parts = num_parts; // Each rank only knows its local number of particles
 
-    // Step 1: Gather the local particle counts to rank 0
+    // Gather the local particle counts to rank 0
     std::vector<int> recv_counts(num_procs, 0);
     MPI_Gather(&local_num_parts, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // Step 2: Compute displacements
+
     std::vector<int> displacements(num_procs, 0);
     int total_particles = 0;
     if (rank == 0) {
@@ -174,19 +172,19 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         total_particles = displacements[num_procs - 1] + recv_counts[num_procs - 1];
     }
 
-    // Step 3: Allocate space for all particles on rank 0
+    // space for all particles on rank 0
     std::vector<particle_t> all_particles;
     if (rank == 0) {
         all_particles.resize(total_particles);
     }
 
-    // Step 4: Gather particles from all processors
+    // Gather particles from ALL the processors
     MPI_Gatherv(parts, local_num_parts, PARTICLE,
                 rank == 0 ? all_particles.data() : nullptr,
                 recv_counts.data(), displacements.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
 
-    // Step 5: Sort by particle ID (only rank 0)
+
     if (rank == 0) {
         std::sort(all_particles.begin(), all_particles.end(), [](const particle_t& a, const particle_t& b) {
             return a.id < b.id;
