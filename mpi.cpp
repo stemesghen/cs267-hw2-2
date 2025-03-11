@@ -165,9 +165,6 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 
 
-    const double p_cutoff = 0.01;
-    const int grid_size = ceil(size / p_cutoff);
-
 
     // Prepare ghost particles for communication
     std::vector<particle_t> top_ghost_particles, bottom_ghost_particles;
