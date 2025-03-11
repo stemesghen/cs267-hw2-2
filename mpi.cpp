@@ -106,8 +106,8 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
         }
     }
     */
-   
-    // Assign particles to the current rank based on Y-coordinate
+
+    /*// Assign particles to the current rank based on Y-coordinate
     std::vector<particle_t> my_particles;
     for (int i = 0; i < num_parts; i++) {
  double y_coordinate = parts[i].y;
@@ -115,6 +115,12 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
         // FIXED: Correctly index mpi_end_index with [rank]
         if (y_coordinate > mpi_start_index[rank] && y_coordinate < mpi_end_index[rank]) {
             my_particles.push_back(parts[i]);
+    */
+   my_particles.clear();
+   for (int i = 0; i < num_parts; i++) {
+       double y_coordinate = parts[i].y;
+       if (y_coordinate >= mpi_start_index[rank] && y_coordinate < mpi_end_index[rank]) {
+           my_particles.push_back(parts[i]);
         }
     }
 
