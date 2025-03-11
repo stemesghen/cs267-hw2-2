@@ -1,5 +1,3 @@
-
-
 #include <cassert>
 #include "common.h"
 #include <mpi.h>
@@ -58,11 +56,7 @@ void move(particle_t& p, double size) {
     // Slightly simplified Velocity Verlet integration
     // Conserves energy better than explicit Euler method
     p.vx += p.ax * dt;
-    p.vy += p.ay * dt;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-
-    // Bounce from walls
+ // Bounce from walls
     while (p.x < 0 || p.x > size) {
         p.x = p.x < 0 ? -p.x : 2 * size - p.x;
         p.vx = -p.vx;
@@ -79,14 +73,11 @@ void move(particle_t& p, double size) {
 
 
 
-
-
-
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-   
-   	// You can use this space to initialize data objects that you may need
-	// This function will be called once before the algorithm begins
-	// Do not do any particle simulation here
+
+        // You can use this space to initialize data objects that you may need
+        // This function will be called once before the algorithm begins
+        // Do not do any particle simulation here
 
 
 
@@ -143,7 +134,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     }
 
     // Ensure all ranks synchronize before continuing
-    MPI_Barrier(MPI_COMM_WORLD);  
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -167,11 +158,10 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     
     */
-    
-    
-    
-    const double p_cutoff = 0.01;
-    const int grid_size = ceil(size / p_cutoff); 
+
+
+   const double p_cutoff = 0.01;
+    const int grid_size = ceil(size / p_cutoff);
     std::vector<std::vector<int>> grid(grid_size * grid_size); // grid cells with particle indices
 
     // Assign particles to grid cells (based on position)
@@ -227,8 +217,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             if (send_count > 0) {
                 MPI_Sendrecv(bottom_ghost_particles.data(), send_count, PARTICLE, rank - 1, 1,
                              recv_top_ghosts.data(), recv_count, PARTICLE, rank - 1, 1,
-                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            }
+      }
         }
     } else {
         int send_count_up = top_ghost_particles.size();
@@ -282,9 +271,6 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     for (particle_t& ghost : recv_bottom_ghosts) {
         for (int i = 0; i < num_parts; ++i) {
             apply_force(parts[i], ghost);
-            apply_force(ghost, parts[i]);
-        }
-    }
 
     // Move particles
     for (int i = 0; i < num_parts; ++i) {
@@ -335,73 +321,32 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     MPI_Barrier(MPI_COMM_WORLD);  // Sync before redistribution
 }
 
-
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    int num_cells_x = sqrt(num_procs);
-    int num_cells_y = num_procs / num_cells_x;
-
-    double cell_width = size / num_cells_x;
-    double cell_height = size / num_cells_y;
-
     std::vector<int> send_counts(num_procs, 0);
-    std::vector<int> recv_counts(num_procs, 0);
+
+    // Gather particle counts from all processes
+    MPI_Gather(&num_parts, 1, MPI_INT, send_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
     std::vector<int> displacements(num_procs, 0);
-    std::vector<std::vector<particle_t>> partitioned_particles(num_procs);
-
-    for (int i = 0; i < num_parts; i++) {
-        int cell_x = std::min(static_cast<int>(parts[i].x / cell_width), num_cells_x - 1);
-        int cell_y = std::min(static_cast<int>(parts[i].y / cell_height), num_cells_y - 1);
-        int target_rank = cell_x + cell_y * num_cells_x;  // Compute MPI rank based on grid position
-        partitioned_particles[target_rank].push_back(parts[i]);
-    }
-
-    for (int i = 0; i < num_procs; i++) {
-        send_counts[i] = partitioned_particles[i].size();
-    }
-
-    MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
-
     int total_particles = 0;
+    std::vector<particle_t> all_particles;
+
     if (rank == 0) {
         for (int i = 0; i < num_procs; i++) {
             displacements[i] = total_particles;
-            total_particles += recv_counts[i];  
+            total_particles += send_counts[i];
         }
-    }
-
-    std::vector<particle_t> send_buffer;
-    for (int i = 0; i < num_procs; i++) {
-        send_buffer.insert(send_buffer.end(), partitioned_particles[i].begin(), partitioned_particles[i].end());
-    }
-
-    std::vector<particle_t> all_particles;
-    if (rank == 0) {
         all_particles.resize(total_particles);
     }
 
-    MPI_Gatherv(send_buffer.data(), send_buffer.size(), PARTICLE,
-                rank == 0 ? all_particles.data() : nullptr, recv_counts.data(), displacements.data(), PARTICLE,
+    MPI_Gatherv(parts, num_parts, PARTICLE,
+                rank == 0 ? all_particles.data() : nullptr,
+                send_counts.data(), displacements.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
         std::sort(all_particles.begin(), all_particles.end(), [](const particle_t& a, const particle_t& b) {
-            return (a.y < b.y) || (a.y == b.y && a.x < b.x);
+            return a.id < b.id;
         });
-
-        std::vector<double> avg_dists;
-        size_t num_avg = std::min<size_t>(50, all_particles.size());
-
-        for (size_t i = 0; i < num_avg; i++) {
-            double dist = sqrt(all_particles[i].x * all_particles[i].x +
-                               all_particles[i].y * all_particles[i].y);
-            avg_dists.push_back(dist);
-        }
-
-        double mean_dist = (num_avg > 0) ? std::accumulate(avg_dists.begin(), avg_dists.end(), 0.0) / num_avg : 0.0;
-        std::cout << "Checking assertion: mean_dist = " << mean_dist << std::endl;
-
-        if (num_avg > 0) {
-            assert(mean_dist < 3e-7);
-        }
     }
 }
