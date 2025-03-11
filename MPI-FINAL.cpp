@@ -14,8 +14,8 @@ using namespace std;
 extern MPI_Datatype PARTICLE;
  int num_cells_x;     // Number of grid cells along X
 int num_cells_y;     // Number of grid cells along Y
- double domain_height; // Domain height
 
+std::vector<particle_t> my_particles;  // Declare globally
 
 
 std::vector<int> mpi_start_index;
@@ -51,11 +51,10 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
 
 }
 
-
 // Integrate the ODE
 void move(particle_t& p, double size) {
     // Slightly simplified Velocity Verlet integration
-    // Conserves energy better than explicit Euler method
+  // Conserves energy better than explicit Euler method
     p.vx += p.ax * dt;
     p.vy += p.ay * dt;
     p.x += p.vx * dt;
@@ -77,260 +76,172 @@ void move(particle_t& p, double size) {
 }
 
 
+
+
+
+
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-
-        // You can use this space to initialize data objects that you may need
-        // This function will be called once before the algorithm begins
-        // Do not do any particle simulation here
-
-
-
-    /* Initialize based on location of all the particle and
-     how you split all the particles into different rows
-
-
-     Each processor handles a row and the particles that are in that row
-
-     Each processor also simulates their particles movement per step. 
-
-     */
-       // Resize vectors to store start and end indices for each rank
-
+    // Resize vectors to store start and end indices for each rank
     mpi_start_index.resize(num_procs);
     mpi_end_index.resize(num_procs);
 
-    // Number of particles to assign per processor
-    int particles_per_rank = num_parts / num_procs;
-    int remaining_particles = num_parts % num_procs;
+    double y_interval = size / num_procs;
+    double starting_y = 0.0;
 
-
-    // Calculate the start and end indices for the particles assigned to this rank
-    int start_rank_index, end_rank_index;
-    if (rank < remaining_particles) {
-        // Distribute the remaining particles among the first 'remaining_particles' ranks
-        start_rank_index = rank * (particles_per_rank + 1);
-        end_rank_index = start_rank_index + particles_per_rank;
-    } else {
-        // Distribute the particles evenly among the remaining ranks
-        start_rank_index = rank * particles_per_rank + remaining_particles;
-        end_rank_index = start_rank_index + particles_per_rank - 1;
+    // Assign start and end Y-coordinates for each processor
+    for (int i = 0; i < num_procs; i++) {
+        mpi_start_index[i] = starting_y;
+        double y_cutoff = starting_y + y_interval;
+        mpi_end_index[i] = y_cutoff;
+        starting_y = y_cutoff;
     }
 
-    // Store the start and end indices for this rank
-    mpi_start_index[rank] = start_rank_index;
-    mpi_end_index[rank] = end_rank_index;
-
-    // Perform domain decomposition (assign particles to processors based on their y-coordinate)
-    double y_start = rank * (domain_height / num_procs);
-    double y_end = (rank + 1) * (domain_height / num_procs);
-
-    // Assign particles to this rank based on their position
-    std::vector<particle_t> local_particles;
-    for (int i = 0; i < num_parts; ++i) {
-        // Check if the particle's position falls within the rank's region
-        if (parts[i].y >= y_start && parts[i].y < y_end) {
-            local_particles.push_back(parts[i]);
+    // Check partitioning within mpi_start_index and mpi_end_index vectors
+    if (rank == 0) {
+        for (int i = 0; i < num_procs; i++) {
+            std::cout << "mpi_start_index[" << i << "] = " << mpi_start_index[i]
+                      << ", mpi_end_index[" << i << "] = " << mpi_end_index[i] << std::endl;
         }
     }
 
-    // Copy local particles back to the original array
-    for (size_t i = 0; i < local_particles.size(); ++i) {
-        parts[i] = local_particles[i];
+    // Assign particles to the current rank based on Y-coordinate
+    std::vector<particle_t> my_particles;
+    for (int i = 0; i < num_parts; i++) {
+ double y_coordinate = parts[i].y;
+
+        // FIXED: Correctly index mpi_end_index with [rank]
+        if (y_coordinate > mpi_start_index[rank] && y_coordinate < mpi_end_index[rank]) {
+            my_particles.push_back(parts[i]);
+        }
     }
 
     // Ensure all ranks synchronize before continuing
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    /*
-    
-    Runs simulation per process 
-    May need to redistribute the particles within this function 
-    Because the next row processor has to have the correct set of particles to sumulate
-    Some particles may go across the different processors after each step. 
-
-    Communication -  ONLY for ghost particles before force calculation happens: 
-        Communication happens if a particls is in row A & another particle in row A+ 1 
-            -  they are close within cut off distance, then they will have force affecting each other. 
-
-            you need to consider particls outside that row (in the top or bottom neighor ranks)
-            Limit communication: 
-                - so use point to point communication (Send Recv with that neighbor)
-                - dynamic array or list or another data structure to consider the particles within the cutoff range
-                - REMEMBER: storing redundant data BUT it avoids communication. 
-
-
-    
-    */
-
-
-
     const double p_cutoff = 0.01;
-    const int grid_size = ceil(size / p_cutoff);
-    std::vector<std::vector<int>> grid(grid_size * grid_size); // grid cells with particle indices
 
-    // Assign particles to grid cells (based on position)
-    for (int i = 0; i < num_parts; i++) {
-        int cell_x = floor(parts[i].x / p_cutoff);
-        int cell_y = floor(parts[i].y / p_cutoff);
-        grid[cell_x + cell_y * grid_size].push_back(i);
-    }
+    double top_boundary = mpi_end_index[rank] - p_cutoff;
+    double bottom_boundary = mpi_start_index[rank] + p_cutoff;
 
-    // Prepare ghost particles for communication
-    std::vector<particle_t> top_ghost_particles, bottom_ghost_particles;
-    std::vector<particle_t> recv_top_ghosts, recv_bottom_ghosts;
+    std::vector<particle_t> send_bottom_ghost_particles;
+    std::vector<particle_t> send_top_ghost_particles;
 
-    double y_start = rank * (domain_height / num_procs);
-    double y_end = (rank + 1) * (domain_height / num_procs);
-    double boundary_tolerance = 1e-7;
-
-    // Identify ghost particles based on the position
-    for (int i = mpi_start_index[rank]; i < mpi_end_index[rank]; i++) {
-        if (parts[i].y >= (y_end - cutoff - boundary_tolerance)) {
-            top_ghost_particles.push_back(parts[i]);
+    for (int i = 0; i < my_particles.size(); i++) {
+        if (my_particles[i].y > top_boundary) {
+            send_top_ghost_particles.push_back(my_particles[i]);
         }
-        if (parts[i].y <= (y_start + cutoff + boundary_tolerance)) {
-            bottom_ghost_particles.push_back(parts[i]);
+        if (my_particles[i].y < bottom_boundary) {
+            send_bottom_ghost_particles.push_back(my_particles[i]);
         }
     }
 
+    int bottom_send_count = send_bottom_ghost_particles.size();
+    int top_send_count = send_top_ghost_particles.size();
+    int bottom_recv_count = 0, top_recv_count = 0;
 
-    // Exchange ghost particles based on rank
-    if (rank == 0) {
-        if (num_procs > 1) {
-            int send_count = top_ghost_particles.size();
-            int recv_count = 0;
-            MPI_Sendrecv(&send_count, 1, MPI_INT, rank + 1, 0,
-                         &recv_count, 1, MPI_INT, rank + 1, 0,
-                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    std::vector<particle_t> recv_top_ghost_particles;
+    std::vector<particle_t> recv_bottom_ghost_particles;
 
-            if (recv_count > 0) recv_bottom_ghosts.resize(recv_count);
-            if (send_count > 0) {
-                MPI_Sendrecv(top_ghost_particles.data(), send_count, PARTICLE, rank + 1, 1,
-                             recv_bottom_ghosts.data(), recv_count, PARTICLE, rank + 1, 1,
-                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            }
-        }
-    } else if (rank == num_procs - 1) {
-        if (num_procs > 1) {
-            int send_count = bottom_ghost_particles.size();
-            int recv_count = 0;
-            MPI_Sendrecv(&send_count, 1, MPI_INT, rank - 1, 0,
-                         &recv_count, 1, MPI_INT, rank - 1, 0,
-                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            if (recv_count > 0) recv_top_ghosts.resize(recv_count);
-            if (send_count > 0) {
-                MPI_Sendrecv(bottom_ghost_particles.data(), send_count, PARTICLE, rank - 1, 1,
-                             recv_top_ghosts.data(), recv_count, PARTICLE, rank - 1, 1,
-                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            }
-        }
-    } else {
-        int send_count_up = top_ghost_particles.size();
-        int send_count_down = bottom_ghost_particles.size();
-        int recv_count_up = 0;
-        int recv_count_down = 0;
-
-        MPI_Sendrecv(&send_count_up, 1, MPI_INT, rank + 1, 0,
-                     &recv_count_up, 1, MPI_INT, rank + 1, 0,
+    // Communication with neighbors
+    if (rank > 0) {  // Has bottom neighbor
+        MPI_Sendrecv(&bottom_send_count, 1, MPI_INT, rank - 1, 0,
+                     &bottom_recv_count, 1, MPI_INT, rank - 1, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Sendrecv(&send_count_down, 1, MPI_INT, rank - 1, 0,
-                     &recv_count_down, 1, MPI_INT, rank - 1, 0,
+        recv_bottom_ghost_particles.resize(bottom_recv_count);
+        MPI_Sendrecv(send_bottom_ghost_particles.data(), bottom_send_count, PARTICLE, rank - 1, 1,
+                     recv_bottom_ghost_particles.data(), bottom_recv_count, PARTICLE, rank - 1, 1,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+   }
 
-        if (recv_count_up > 0) recv_bottom_ghosts.resize(recv_count_up);
-        if (recv_count_down > 0) recv_top_ghosts.resize(recv_count_down);
+    if (rank < num_procs - 1) {  // Has top neighbor
+        MPI_Sendrecv(&top_send_count, 1, MPI_INT, rank + 1, 0,
+                     &top_recv_count, 1, MPI_INT, rank + 1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        recv_top_ghost_particles.resize(top_recv_count);
+        MPI_Sendrecv(send_top_ghost_particles.data(), top_send_count, PARTICLE, rank + 1, 1,
+                     recv_top_ghost_particles.data(), top_recv_count, PARTICLE, rank + 1, 1,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
 
-        if (send_count_up > 0) {
-MPI_Sendrecv(top_ghost_particles.data(), send_count_up, PARTICLE, rank + 1, 1,
-                         recv_bottom_ghosts.data(), recv_count_up, PARTICLE, rank + 1, 1,
-                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        if (send_count_down > 0) {
-            MPI_Sendrecv(bottom_ghost_particles.data(), send_count_down, PARTICLE, rank - 1, 1,
-                         recv_top_ghosts.data(), recv_count_down, PARTICLE, rank - 1, 1,
-                         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    // Apply forces between local particles
+    for (int i = 0; i < my_particles.size(); i++) {
+        for (int j = i + 1; j < my_particles.size(); j++) {
+            apply_force(my_particles[i], my_particles[j]);
         }
     }
 
-    // Force calculation (after ghost particles are exchanged)
-    for (int i = 0; i < num_parts; ++i) {
-        parts[i].ax = parts[i].ay = 0;
-    }
-
-    // Apply force between particles and ghosts
-    for (int i = 0; i < num_parts; ++i) {
-        for (int j = i + 1; j < num_parts; ++j) {
-            apply_force(parts[i], parts[j]);
-            apply_force(parts[j], parts[i]);
+    // Apply forces from ghost particles
+    for (int i = 0; i < my_particles.size(); i++) {
+        for (int j = 0; j < recv_bottom_ghost_particles.size(); j++) {
+            apply_force(my_particles[i], recv_bottom_ghost_particles[j]);
+        }
+        for (int j = 0; j < recv_top_ghost_particles.size(); j++) {
+            apply_force(my_particles[i], recv_top_ghost_particles[j]);
         }
     }
 
-    for (particle_t& ghost : recv_top_ghosts) {
-        for (int i = 0; i < num_parts; ++i) {
-            apply_force(parts[i], ghost);
-            apply_force(ghost, parts[i]);
+    // Move local particles
+    for (int i = 0; i < my_particles.size(); i++) {
+        move(my_particles[i], size);
+    }
+
+    // REDISTRIBUTION: Move particles between ranks
+    std::vector<particle_t> send_bottom_particles, send_top_particles;
+    std::vector<int> remove_indices;
+
+    for (int i = 0; i < my_particles.size(); i++) {
+        if (my_particles[i].y < mpi_start_index[rank]) {
+            send_bottom_particles.push_back(my_particles[i]);
+            remove_indices.push_back(i);
+        } else if (my_particles[i].y > mpi_end_index[rank]) {
+            send_top_particles.push_back(my_particles[i]);
+            remove_indices.push_back(i);
         }
     }
 
-    for (particle_t& ghost : recv_bottom_ghosts) {
-        for (int i = 0; i < num_parts; ++i) {
-            apply_force(parts[i], ghost);
-            apply_force(ghost, parts[i]);
-        }
+    // Remove particles **after** collecting indices
+    for (int i = remove_indices.size() - 1; i >= 0; i--) {
+        my_particles.erase(my_particles.begin() + remove_indices[i]);
     }
 
-    // Move particles
-    for (int i = 0; i < num_parts; ++i) {
-        move(parts[i], size);
+    int bottom_send_count_particles = send_bottom_particles.size();
+    int top_send_count_particles = send_top_particles.size();
+    int bottom_recv_count_particles = 0, top_recv_count_particles = 0;
+  std::vector<particle_t> recv_bottom_particles;
+    std::vector<particle_t> recv_top_particles;
+
+    if (rank > 0) {
+        MPI_Sendrecv(&bottom_send_count_particles, 1, MPI_INT, rank - 1, 0,
+                     &bottom_recv_count_particles, 1, MPI_INT, rank - 1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        recv_bottom_particles.resize(bottom_recv_count_particles);
+        MPI_Sendrecv(send_bottom_particles.data(), bottom_send_count_particles, PARTICLE, rank - 1, 1,
+                     recv_bottom_particles.data(), bottom_recv_count_particles, PARTICLE, rank - 1, 1,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
-
-/// REDISTRIBUTION 
-    // After moving the particles, check if they have crossed boundaries and update ghost particles
-    std::vector<particle_t> moved_top_ghost_particles, moved_bottom_ghost_particles;
-
-    for (int i = mpi_start_index[rank]; i < mpi_end_index[rank]; i++) {
-        if (parts[i].y >= (y_end - cutoff - boundary_tolerance)) {
-            moved_top_ghost_particles.push_back(parts[i]);
-        }
- if (parts[i].y <= (y_start + cutoff + boundary_tolerance)) {
-            moved_bottom_ghost_particles.push_back(parts[i]);
-        }
+    if (rank < num_procs - 1) {
+        MPI_Sendrecv(&top_send_count_particles, 1, MPI_INT, rank + 1, 0,
+                     &top_recv_count_particles, 1, MPI_INT, rank + 1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        recv_top_particles.resize(top_recv_count_particles);
+        MPI_Sendrecv(send_top_particles.data(), top_send_count_particles, PARTICLE, rank + 1, 1,
+                     recv_top_particles.data(), top_recv_count_particles, PARTICLE, rank + 1, 1,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 
-    // If there are multiple ranks, exchange ghost particles
-    if (num_procs > 1) {
-        // For Rank 0
-        if (rank == 0 && !moved_top_ghost_particles.empty()) {
-            MPI_Sendrecv(moved_top_ghost_particles.data(), moved_top_ghost_particles.size(), PARTICLE,
-                         rank + 1, 0, recv_bottom_ghosts.data(), moved_top_ghost_particles.size(),
-                         PARTICLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-        // For Rank num_procs - 1 (last rank)
-        else if (rank == num_procs - 1 && !moved_bottom_ghost_particles.empty()) {
-            MPI_Sendrecv(moved_bottom_ghost_particles.data(), moved_bottom_ghost_particles.size(), PARTICLE,
-                         rank - 1, 0, recv_top_ghosts.data(), moved_bottom_ghost_particles.size(),
-                         PARTICLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-        // For Middle Ranks (between Rank 0 and num_procs - 1)
-        else if (rank > 0 && rank < num_procs - 1) {
-            // Exchange ghost particles with both neighbors
-            MPI_Sendrecv(moved_top_ghost_particles.data(), moved_top_ghost_particles.size(), PARTICLE,
-                         rank + 1, 0, recv_bottom_ghosts.data(), moved_top_ghost_particles.size(),
-                         PARTICLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    // Add received particles to my_particles
+    my_particles.insert(my_particles.end(), recv_bottom_particles.begin(), recv_bottom_particles.end());
+    my_particles.insert(my_particles.end(), recv_top_particles.begin(), recv_top_particles.end());
 
-            MPI_Sendrecv(moved_bottom_ghost_particles.data(), moved_bottom_ghost_particles.size(), PARTICLE,
-                         rank - 1, 0, recv_top_ghosts.data(), moved_bottom_ghost_particles.size(),
-                         PARTICLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-    }
+
 
     MPI_Barrier(MPI_COMM_WORLD);  // Sync before redistribution
 }
+
 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     std::vector<int> send_counts(num_procs, 0);
@@ -349,7 +260,8 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         }
         all_particles.resize(total_particles);
     }
- MPI_Gatherv(parts, num_parts, PARTICLE,
+
+    MPI_Gatherv(parts, num_parts, PARTICLE,
                 rank == 0 ? all_particles.data() : nullptr,
                 send_counts.data(), displacements.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
@@ -360,4 +272,5 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         });
     }
 }
+
 
