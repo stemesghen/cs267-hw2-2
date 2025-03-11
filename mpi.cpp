@@ -78,7 +78,7 @@ void move(particle_t& p, double size) {
 
 
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-
+domain height = size
         // You can use this space to initialize data objects that you may need
         // This function will be called once before the algorithm begins
         // Do not do any particle simulation here
@@ -168,14 +168,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     const double p_cutoff = 0.01;
     const int grid_size = ceil(size / p_cutoff);
-    std::vector<std::vector<int>> grid(grid_size * grid_size); // grid cells with particle indices
 
-    // Assign particles to grid cells (based on position)
-    for (int i = 0; i < num_parts; i++) {
-        int cell_x = floor(parts[i].x / p_cutoff);
-        int cell_y = floor(parts[i].y / p_cutoff);
-        grid[cell_x + cell_y * grid_size].push_back(i);
-    }
 
     // Prepare ghost particles for communication
     std::vector<particle_t> top_ghost_particles, bottom_ghost_particles;
