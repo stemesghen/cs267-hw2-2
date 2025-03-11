@@ -1,5 +1,4 @@
 
-
 #include <cassert>
 #include "common.h"
 #include <mpi.h>
@@ -22,7 +21,6 @@ int num_cells_y;     // Number of grid cells along Y
 
 std::vector<int> mpi_start_index;
 std::vector<int> mpi_end_index;
-
 
 
 // Apply the force from neighbor to particle
@@ -53,6 +51,7 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
 
 }
 
+
 // Integrate the ODE
 void move(particle_t& p, double size) {
     // Slightly simplified Velocity Verlet integration
@@ -78,15 +77,11 @@ void move(particle_t& p, double size) {
 }
 
 
-
-
-
-
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-   
-   	// You can use this space to initialize data objects that you may need
-	// This function will be called once before the algorithm begins
-	// Do not do any particle simulation here
+
+        // You can use this space to initialize data objects that you may need
+        // This function will be called once before the algorithm begins
+        // Do not do any particle simulation here
 
 
 
@@ -107,7 +102,6 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     // Number of particles to assign per processor
     int particles_per_rank = num_parts / num_procs;
     int remaining_particles = num_parts % num_procs;
-
     // Calculate the start and end indices for the particles assigned to this rank
     int start_rank_index, end_rank_index;
     if (rank < remaining_particles) {
@@ -143,10 +137,12 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     }
 
     // Ensure all ranks synchronize before continuing
-    MPI_Barrier(MPI_COMM_WORLD);  
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
+
+
     /*
     
     Runs simulation per process 
@@ -167,11 +163,11 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     
     */
-    
-    
-    
+
+
+
     const double p_cutoff = 0.01;
-    const int grid_size = ceil(size / p_cutoff); 
+    const int grid_size = ceil(size / p_cutoff);
     std::vector<std::vector<int>> grid(grid_size * grid_size); // grid cells with particle indices
 
     // Assign particles to grid cells (based on position)
@@ -198,6 +194,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             bottom_ghost_particles.push_back(parts[i]);
         }
     }
+
+
 
     // Exchange ghost particles based on rank
     if (rank == 0) {
@@ -230,6 +228,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
                              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             }
         }
+
+
     } else {
         int send_count_up = top_ghost_particles.size();
         int send_count_down = bottom_ghost_particles.size();
@@ -258,6 +258,11 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
                          MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
     }
+
+
+
+
+
 
     // Force calculation (after ghost particles are exchanged)
     for (int i = 0; i < num_parts; ++i) {
@@ -334,57 +339,32 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     MPI_Barrier(MPI_COMM_WORLD);  // Sync before redistribution
 }
-
-
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    // Gather the number of particles from each rank (send_counts)
-    std::vector<int> send_counts(num_procs);
+    std::vector<int> send_counts(num_procs, 0);
+
+    // Gather particle counts from all processes
     MPI_Gather(&num_parts, 1, MPI_INT, send_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // Calculate the displacements (where each rank's data starts in the final array)
-    std::vector<int> displacements(num_procs);
+    std::vector<int> displacements(num_procs, 0);
     int total_particles = 0;
+    std::vector<particle_t> all_particles;
+
     if (rank == 0) {
         for (int i = 0; i < num_procs; i++) {
             displacements[i] = total_particles;
-            total_particles += send_counts[i];  // Total number of particles in the final array
+            total_particles += send_counts[i];
         }
+        all_particles.resize(total_particles);
     }
 
-    // Prepare to gather all particles into one array on rank 0
-    std::vector<particle_t> all_particles;
-    if (rank == 0) {
-        all_particles.resize(total_particles);  // Resize to accommodate all particles from all ranks
-    }
-
-    // Gather the actual particle data using MPI_Gatherv
     MPI_Gatherv(parts, num_parts, PARTICLE,
-                all_particles.data(), send_counts.data(), displacements.data(), PARTICLE,
+                rank == 0 ? all_particles.data() : nullptr,
+                send_counts.data(), displacements.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
 
-    // Perform computations on the gathered data on rank 0
     if (rank == 0) {
-        // Sort particles by their id (or any other relevant criteria)
         std::sort(all_particles.begin(), all_particles.end(), [](const particle_t& a, const particle_t& b) {
             return a.id < b.id;
         });
-
-        std::cout << "Rank " << rank << " Final Gather: Collected "
-                  << all_particles.size() << " particles." << std::endl;
-
-        // Step 5: Compute the mean distance for the first 50 particles
-        std::vector<double> avg_dists;
-        for (size_t i = 0; i < all_particles.size(); i++) {
-            double dist = sqrt(all_particles[i].x * all_particles[i].x +
-                               all_particles[i].y * all_particles[i].y);
-            avg_dists.push_back(dist);
-        }
-
-        // Compute the mean of the first 50 distances
-        double mean_dist = std::accumulate(avg_dists.begin(), avg_dists.begin() + 50, 0.0) / 50;
-        std::cout << "Checking assertion: mean_dist = " << mean_dist << std::endl;
-
-        // Step 6: Assertion check based on the first 50 distances
-        assert(mean_dist < 3e-7);
     }
 }
