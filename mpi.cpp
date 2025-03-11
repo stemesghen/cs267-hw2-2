@@ -94,6 +94,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
      */
        // Resize vectors to store start and end indices for each rank
+    domain_height = size;  // Set domain height
 
     mpi_start_index.resize(num_procs);
     mpi_end_index.resize(num_procs);
