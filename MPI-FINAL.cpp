@@ -51,12 +51,17 @@ void apply_force(particle_t& particle, particle_t& neighbor) {
 
 }
 
+
 // Integrate the ODE
 void move(particle_t& p, double size) {
     // Slightly simplified Velocity Verlet integration
     // Conserves energy better than explicit Euler method
     p.vx += p.ax * dt;
- // Bounce from walls
+    p.vy += p.ay * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    // Bounce from walls
     while (p.x < 0 || p.x > size) {
         p.x = p.x < 0 ? -p.x : 2 * size - p.x;
         p.vx = -p.vx;
@@ -70,7 +75,6 @@ void move(particle_t& p, double size) {
 
 
 }
-
 
 
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -98,6 +102,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     // Number of particles to assign per processor
     int particles_per_rank = num_parts / num_procs;
     int remaining_particles = num_parts % num_procs;
+
 
     // Calculate the start and end indices for the particles assigned to this rank
     int start_rank_index, end_rank_index;
@@ -160,7 +165,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     */
 
 
-   const double p_cutoff = 0.01;
+
+    const double p_cutoff = 0.01;
     const int grid_size = ceil(size / p_cutoff);
     std::vector<std::vector<int>> grid(grid_size * grid_size); // grid cells with particle indices
 
@@ -188,6 +194,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             bottom_ghost_particles.push_back(parts[i]);
         }
     }
+
 
     // Exchange ghost particles based on rank
     if (rank == 0) {
@@ -217,7 +224,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             if (send_count > 0) {
                 MPI_Sendrecv(bottom_ghost_particles.data(), send_count, PARTICLE, rank - 1, 1,
                              recv_top_ghosts.data(), recv_count, PARTICLE, rank - 1, 1,
-      }
+                             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            }
         }
     } else {
         int send_count_up = top_ghost_particles.size();
@@ -236,7 +244,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         if (recv_count_down > 0) recv_top_ghosts.resize(recv_count_down);
 
         if (send_count_up > 0) {
-            MPI_Sendrecv(top_ghost_particles.data(), send_count_up, PARTICLE, rank + 1, 1,
+MPI_Sendrecv(top_ghost_particles.data(), send_count_up, PARTICLE, rank + 1, 1,
                          recv_bottom_ghosts.data(), recv_count_up, PARTICLE, rank + 1, 1,
                          MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
@@ -271,6 +279,9 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     for (particle_t& ghost : recv_bottom_ghosts) {
         for (int i = 0; i < num_parts; ++i) {
             apply_force(parts[i], ghost);
+            apply_force(ghost, parts[i]);
+        }
+    }
 
     // Move particles
     for (int i = 0; i < num_parts; ++i) {
@@ -286,7 +297,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         if (parts[i].y >= (y_end - cutoff - boundary_tolerance)) {
             moved_top_ghost_particles.push_back(parts[i]);
         }
-        if (parts[i].y <= (y_start + cutoff + boundary_tolerance)) {
+ if (parts[i].y <= (y_start + cutoff + boundary_tolerance)) {
             moved_bottom_ghost_particles.push_back(parts[i]);
         }
     }
@@ -338,8 +349,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         }
         all_particles.resize(total_particles);
     }
-
-    MPI_Gatherv(parts, num_parts, PARTICLE,
+ MPI_Gatherv(parts, num_parts, PARTICLE,
                 rank == 0 ? all_particles.data() : nullptr,
                 send_counts.data(), displacements.data(), PARTICLE,
                 0, MPI_COMM_WORLD);
@@ -350,3 +360,4 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         });
     }
 }
+
