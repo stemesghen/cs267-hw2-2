@@ -98,14 +98,15 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
         starting_y = y_cutoff;
     }
 
-    // Check partitioning within mpi_start_index and mpi_end_index vectors
+   /* // Check partitioning within mpi_start_index and mpi_end_index vectors
     if (rank == 0) {
         for (int i = 0; i < num_procs; i++) {
             std::cout << "mpi_start_index[" << i << "] = " << mpi_start_index[i]
                       << ", mpi_end_index[" << i << "] = " << mpi_end_index[i] << std::endl;
         }
     }
-
+    */
+   
     // Assign particles to the current rank based on Y-coordinate
     std::vector<particle_t> my_particles;
     for (int i = 0; i < num_parts; i++) {
@@ -279,7 +280,6 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
         }
 
         double mean_dist = std::accumulate(avg_dists.begin(), avg_dists.end(), 0.0) / avg_dists.size();
-        std::cout << "Checking assertion: mean_dist = " << mean_dist << std::endl;
         assert(mean_dist < 3e-7);
     }
 }
